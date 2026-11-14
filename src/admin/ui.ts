@@ -31,6 +31,44 @@ ${error ? '<p style="color:var(--err)">Senha incorreta.</p>' : ''}
 <p><button class="primary" style="width:100%">Entrar</button></p></form></div></main></body></html>`;
 }
 
+const escHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+function simplePage(title: string, body: string): string {
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escHtml(title)}</title><style>${STYLE}</style></head>
+<body><main style="max-width:720px"><div class="card">${body}</div></main></body></html>`;
+}
+
+export function messagePage(title: string, message: string, isError = false): string {
+  return simplePage(
+    title,
+    `<h2 style="margin-top:0">${escHtml(title)}</h2><p${isError ? ' style="color:var(--err)"' : ''}>${escHtml(message)}</p><p><a href="/">← Voltar ao painel</a></p>`,
+  );
+}
+
+export function privacyPage(origin: string): string {
+  return simplePage(
+    'Política de Privacidade',
+    `<h2 style="margin-top:0">Política de Privacidade</h2>
+<p>Este aplicativo é uma ferramenta de uso interno que responde automaticamente mensagens diretas e comentários enviados à conta profissional do próprio titular no Instagram e no WhatsApp.</p>
+<h3>Dados tratados</h3>
+<p>Identificador da conta (fornecido pela Meta), nome e nome de usuário públicos, o conteúdo das mensagens e comentários enviados à conta, e dados que a própria pessoa informar na conversa (como e-mail ou telefone).</p>
+<h3>Finalidade</h3>
+<p>Os dados são usados exclusivamente para responder às mensagens, organizar os contatos e dar continuidade ao atendimento. Não são vendidos, compartilhados com terceiros nem usados para publicidade.</p>
+<h3>Armazenamento</h3>
+<p>Os dados ficam armazenados em banco de dados privado na infraestrutura da Cloudflare, com acesso restrito ao titular da conta.</p>
+<h3>Exclusão</h3>
+<p>Para pedir a exclusão dos seus dados, siga as instruções em <a href="${escHtml(origin)}/exclusao-de-dados">${escHtml(origin)}/exclusao-de-dados</a>.</p>`,
+  );
+}
+
+export function dataDeletionPage(): string {
+  return simplePage(
+    'Exclusão de dados',
+    `<h2 style="margin-top:0">Exclusão de dados</h2>
+<p>Para excluir os dados de uma conversa com esta conta, envie uma mensagem direta com o texto <b>"excluir meus dados"</b> ou peça pelo próprio canal de atendimento. A exclusão é feita em até 30 dias e inclui o histórico de mensagens, as tags e os dados informados na conversa.</p>`,
+  );
+}
+
 export function appPage(): string {
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoChat</title><style>${STYLE}</style></head>
 <body><header><b>AutoChat</b><nav id="nav"></nav><a class="btn" href="/logout">Sair</a></header><main id="app"></main>
@@ -63,17 +101,30 @@ addEventListener('hashchange', route);
 
 // ---------------- Painel ----------------
 async function viewDashboard(){
-  const s = await api('/stats');
+  const [s, ig] = await Promise.all([api('/stats'), api('/instagram')]);
   const hook = location.origin + '/webhook';
+  const igCard = '<div class="card"><h3 style="margin-top:0">Instagram</h3>'
+    + (ig.connected
+      ? '<p>✅ Conectado'+(ig.username ? ' como <b>@'+esc(ig.username)+'</b>' : '')+(ig.connectedAt ? ' <span class="muted">desde '+fmt(ig.connectedAt)+'</span>' : '')+'</p>'
+        + (ig.subscribeWarning ? '<p style="color:var(--err)">A conta conectou, mas a inscrição nos avisos da Meta falhou: '+esc(ig.subscribeWarning)+'. Tente "Reconectar".</p>' : '')
+        + '<div class="row"><a class="btn auto" href="/connect/instagram">Reconectar</a><button class="auto danger" id="igoff">Desconectar</button></div>'
+      : (ig.canConnect
+        ? '<p class="muted">Clique abaixo, entre com a conta da empresa e selecione o Instagram. O AutoChat guarda o acesso sozinho.</p><a class="btn" href="/connect/instagram" style="display:inline-block;background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600">Conectar Instagram</a>'
+        : '<p style="color:var(--err)">Faltam META_APP_ID e META_LOGIN_CONFIG_ID na configuração.</p>'))
+    + (ig.hasAppSecret ? '' : '<p style="color:var(--err)">Falta o segredo <code>META_APP_SECRET</code> (Chave secreta do app). Sem ele os avisos da Meta são recusados.</p>')
+    + '</div>';
   app.innerHTML = '<div class="grid">'
     + [['Contatos', s.contacts], ['Recebidas (24h)', s.in24h], ['Enviadas (24h)', s.out24h], ['Erros (24h)', s.errors24h]]
       .map(([l,v]) => '<div class="card stat"><b>'+v+'</b><span>'+l+'</span></div>').join('')
-    + '</div><div class="card"><h3 style="margin-top:0">Conexão com a Meta</h3>'
+    + '</div>' + igCard + '<div class="card"><h3 style="margin-top:0">Webhook da Meta</h3>'
     + '<p>URL do webhook (Instagram e WhatsApp): <code>'+esc(hook)+'</code></p>'
     + '<p class="muted">Token de verificação: o valor do segredo <code>META_VERIFY_TOKEN</code>. '
     + 'No Instagram assine os campos <code>messages</code>, <code>messaging_postbacks</code> e <code>comments</code>; no WhatsApp, <code>messages</code>.</p>'
+    + '<p class="muted">Política de privacidade (para publicar o app): <code>'+esc(location.origin)+'/privacidade</code><br>Exclusão de dados: <code>'+esc(location.origin)+'/exclusao-de-dados</code></p>'
     + (s.errors24h ? '<p style="color:var(--err)">Houve erros de envio nas últimas 24h — abra o contato em <a href="#contatos">Contatos</a> para ver o detalhe.</p>' : '')
     + '</div>';
+  const off = $('#igoff');
+  if (off) off.onclick = async () => { if (!confirm('Desconectar o Instagram? As automações param de responder.')) return; await api('/instagram', {method:'DELETE'}); route(); };
 }
 
 // ---------------- Automações ----------------
@@ -280,6 +331,7 @@ async function viewContact(id){
     + '<p class="muted">'+CH[c.channel]+(c.username?' · @'+esc(c.username):'')+' · desde '+fmt(c.createdAt)+'</p>'
     + '<p>'+(c.email?'✉️ '+esc(c.email)+'  ':'')+(c.phone?'📞 '+esc(c.phone):'')+'</p>'
     + (fields.length ? '<p>'+fields.map(([k,v]) => '<span class="chip">'+esc(k)+': '+esc(v)+'</span>').join('')+'</p>' : '')
+    + '<p><button class="small danger" id="delc">Excluir contato e histórico</button></p>'
     + '<label>Tags</label><div>'+c.tags.map(t => '<span class="chip">'+esc(t)+' <a href="#" data-rmtag="'+esc(t)+'" style="color:inherit">✕</a></span>').join('')
     + '</div><div class="row" style="margin-top:8px"><input id="newtag" placeholder="nova tag"><button class="auto" id="addtag">Adicionar</button></div></div>'
     + '<div class="card"><h3 style="margin-top:0">Conversa</h3><div class="msgs" id="msgs">'
@@ -288,6 +340,7 @@ async function viewContact(id){
     + '</div><div class="row" style="margin-top:10px"><input id="txt" placeholder="'+(open?'Responder manualmente…':'Fora da janela de 24h da Meta')+'"'+(open?'':' disabled')+'><button class="primary auto" id="send"'+(open?'':' disabled')+'>Enviar</button></div></div>';
   const box = $('#msgs'); box.scrollTop = box.scrollHeight;
   const tags = async (body) => { try { await api('/contacts/'+id+'/tags', {method:'POST', body}); viewContact(id); } catch(e){ toast(e.message); } };
+  $('#delc').onclick = async () => { if (!confirm('Excluir este contato e todo o histórico? Não dá para desfazer.')) return; await api('/contacts/'+id, {method:'DELETE'}); location.hash='contatos'; };
   $('#addtag').onclick = () => { const v = $('#newtag').value.trim(); if (v) tags({add:[v]}); };
   app.querySelectorAll('[data-rmtag]').forEach(a => a.onclick = (e) => { e.preventDefault(); tags({remove:[a.dataset.rmtag]}); });
   $('#send').onclick = async () => {

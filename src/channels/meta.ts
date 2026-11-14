@@ -3,6 +3,13 @@ import type { Channel, OutMessage, Recipient, Sender } from '../types';
 export interface MetaConfig {
   version: string;
   igToken?: string;
+  /** ID da conta profissional do Instagram (obrigatório no login unificado) */
+  igAccountId?: string;
+  /**
+   * 'facebook' = login unificado (token de usuário do sistema, graph.facebook.com);
+   * 'instagram' = token antigo do Instagram Login (graph.instagram.com).
+   */
+  igHost?: 'facebook' | 'instagram';
   waToken?: string;
   waPhoneNumberId?: string;
   fetch?: typeof fetch;
@@ -23,16 +30,20 @@ export class MetaSender implements Sender {
     return this.sendWhatsApp(to.userId, msg);
   }
 
+  private igBase() {
+    return `https://graph.${this.cfg.igHost === 'instagram' ? 'instagram' : 'facebook'}.com/${this.cfg.version}`;
+  }
+
   async replyToComment(commentId: string, text: string): Promise<void> {
-    this.need(this.cfg.igToken, 'IG_ACCESS_TOKEN');
-    await this.post(`https://graph.instagram.com/${this.cfg.version}/${encodeURIComponent(commentId)}/replies`, this.cfg.igToken!, {
+    this.need(this.cfg.igToken, 'conexão com o Instagram');
+    await this.post(`${this.igBase()}/${encodeURIComponent(commentId)}/replies`, this.cfg.igToken!, {
       message: text,
     });
   }
 
   async fetchInstagramProfile(userId: string) {
     if (!this.cfg.igToken) return null;
-    const url = `https://graph.instagram.com/${this.cfg.version}/${encodeURIComponent(userId)}?fields=name,username`;
+    const url = `${this.igBase()}/${encodeURIComponent(userId)}?fields=name,username`;
     const res = await this.f(url, { headers: { Authorization: `Bearer ${this.cfg.igToken}` } });
     if (!res.ok) return null;
     const j = (await res.json()) as { name?: string; username?: string };
@@ -92,9 +103,12 @@ export class MetaSender implements Sender {
   }
 
   private async sendInstagram(to: Recipient, msg: OutMessage) {
-    this.need(this.cfg.igToken, 'IG_ACCESS_TOKEN');
+    this.need(this.cfg.igToken, 'conexão com o Instagram');
     const recipient = 'commentId' in to ? { comment_id: to.commentId } : { id: to.userId };
-    await this.post(`https://graph.instagram.com/${this.cfg.version}/me/messages`, this.cfg.igToken!, {
+    // Login unificado: POST /<IG_ID>/messages. Token antigo do Instagram: POST /me/messages.
+    const node = this.cfg.igHost === 'instagram' ? 'me' : this.cfg.igAccountId;
+    if (!node) throw new Error('ID da conta do Instagram não configurado: conecte o Instagram no painel');
+    await this.post(`${this.igBase()}/${encodeURIComponent(node)}/messages`, this.cfg.igToken!, {
       recipient,
       message: MetaSender.instagramMessage(msg),
     });

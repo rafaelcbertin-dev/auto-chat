@@ -7,7 +7,10 @@ compatibility_date = "2025-09-01"
 crons = ["0 3 * * *"]
 
 [vars]
-GRAPH_API_VERSION = "v21.0"
+GRAPH_API_VERSION = "v26.0"
+# IDs públicos do app na Meta (login unificado do Instagram)
+META_APP_ID = "1084098101307628"
+META_LOGIN_CONFIG_ID = "29640439518978612"
 
 [[d1_databases]]
 binding = "DB"
@@ -18,8 +21,7 @@ migrations_dir = "migrations"
 # Segredos (configure com `npx wrangler secret put NOME`):
 #   ADMIN_PASSWORD      senha do painel
 #   META_VERIFY_TOKEN   texto qualquer, igual ao configurado no webhook da Meta
-#   META_APP_SECRET     App Secret do app da Meta (assinatura dos webhooks do WhatsApp)
-#   IG_APP_SECRET       Instagram App Secret (assinatura dos webhooks do Instagram)
-#   IG_ACCESS_TOKEN     token de longa duração do Instagram (Instagram API with Instagram Login)
+#   META_APP_SECRET     Chave secreta do app da Meta (Configurações do app › Básico)
+#   (o acesso ao Instagram é feito pelo botão "Conectar Instagram" no painel)
 #   WA_ACCESS_TOKEN     token permanente do usuário de sistema (WhatsApp Cloud API)
 #   WA_PHONE_NUMBER_ID  ID do número no WhatsApp Cloud API

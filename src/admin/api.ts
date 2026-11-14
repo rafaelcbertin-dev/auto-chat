@@ -120,6 +120,10 @@ export async function handleApi(req: Request, url: URL, store: D1Store, sender: 
       const contact = await store.getContact(id);
       if (!contact) return json({ error: 'Contato não encontrado' }, 404);
       if (!mm[2] && m === 'GET') return json(contact);
+      if (!mm[2] && m === 'DELETE') {
+        await store.deleteContact(id);
+        return json({ ok: true });
+      }
       if (mm[2] === '/tags' && m === 'POST') {
         const body = (await req.json()) as any;
         await store.addTags(id, strList(body.add));

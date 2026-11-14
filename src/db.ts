@@ -262,6 +262,16 @@ export class D1Store implements Store {
     };
   }
 
+  async deleteContact(id: number) {
+    await this.db.batch([
+      this.db.prepare('DELETE FROM messages WHERE contact_id = ?').bind(id),
+      this.db.prepare('DELETE FROM contact_tags WHERE contact_id = ?').bind(id),
+      this.db.prepare('DELETE FROM sessions WHERE contact_id = ?').bind(id),
+      this.db.prepare('DELETE FROM runs WHERE contact_id = ?').bind(id),
+      this.db.prepare('DELETE FROM contacts WHERE id = ?').bind(id),
+    ]);
+  }
+
   async allTags() {
     const r = await this.db.prepare('SELECT tag, COUNT(*) AS n FROM contact_tags GROUP BY tag ORDER BY tag').all<{ tag: string; n: number }>();
     return r.results;
@@ -281,6 +291,25 @@ export class D1Store implements Store {
       out24h: msgsOut.results[0]?.n ?? 0,
       errors24h: errors.results[0]?.n ?? 0,
     };
+  }
+
+  async getSetting<T>(key: string): Promise<T | null> {
+    const r = await this.db.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first<{ value: string }>();
+    return r ? parseJSON<T | null>(r.value, null) : null;
+  }
+
+  async setSetting(key: string, value: unknown) {
+    await this.db
+      .prepare(
+        `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      )
+      .bind(key, JSON.stringify(value), now())
+      .run();
+  }
+
+  async deleteSetting(key: string) {
+    await this.db.prepare('DELETE FROM settings WHERE key = ?').bind(key).run();
   }
 
   async cleanup() {
