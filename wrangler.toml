@@ -12,8 +12,7 @@ GRAPH_API_VERSION = "v21.0"
 [[d1_databases]]
 binding = "DB"
 database_name = "autochat"
-# Rode `npx wrangler d1 create autochat` e cole o database_id aqui
-database_id = "COLE_AQUI_O_ID_DO_D1"
+database_id = "f17fc30f-58e8-4eb3-8a43-39ff698e75b0"
 migrations_dir = "migrations"
 
 # Segredos (configure com `npx wrangler secret put NOME`):
