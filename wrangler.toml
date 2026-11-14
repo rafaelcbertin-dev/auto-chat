@@ -25,3 +25,7 @@ migrations_dir = "migrations"
 #   (o acesso ao Instagram é feito pelo botão "Conectar Instagram" no painel)
 #   WA_ACCESS_TOKEN     token permanente do usuário de sistema (WhatsApp Cloud API)
 #   WA_PHONE_NUMBER_ID  ID do número no WhatsApp Cloud API
+
+# Logs no painel da Cloudflare (Workers › autochat › Observability)
+[observability]
+enabled = true

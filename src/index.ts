@@ -73,7 +73,10 @@ async function handleWebhook(req: Request, env: Env, ctx: ExecutionContext): Pro
     [env.META_APP_SECRET, env.IG_APP_SECRET],
     env.ALLOW_UNSIGNED_WEBHOOKS === 'true',
   );
-  if (!ok) return new Response('Invalid signature', { status: 401 });
+  if (!ok) {
+    console.warn('webhook: assinatura inválida', { len: raw.length, hasHeader: !!req.headers.get('X-Hub-Signature-256') });
+    return new Response('Invalid signature', { status: 401 });
+  }
 
   let body: unknown;
   try {
@@ -82,6 +85,12 @@ async function handleWebhook(req: Request, env: Env, ctx: ExecutionContext): Pro
     return new Response('Bad JSON', { status: 400 });
   }
   const events = parseWebhook(body);
+  const b = body as { object?: string; entry?: { id?: string; changes?: { field?: string }[]; messaging?: unknown[] }[] };
+  console.log('webhook recebido', {
+    object: b?.object,
+    entries: b?.entry?.map((e) => ({ id: e.id, fields: e.changes?.map((c) => c.field), messaging: e.messaging?.length ?? 0 })),
+    eventos: events.map((e) => `${e.kind}:${e.eventId}`),
+  });
   if (events.length) {
     const store = new D1Store(env.DB);
     // Responde 200 na hora (a Meta exige resposta rápida) e processa em segundo plano
@@ -92,7 +101,7 @@ async function handleWebhook(req: Request, env: Env, ctx: ExecutionContext): Pro
           try {
             await engine.handle(ev);
           } catch (e) {
-            console.error('erro ao processar evento', ev.eventId, e);
+            console.error('erro ao processar evento', ev.eventId, String(e));
           }
         }
       })(),
