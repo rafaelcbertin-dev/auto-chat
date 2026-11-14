@@ -150,10 +150,9 @@ async function viewAutomations(){
 
 const TEMPLATES = {
   comment: () => ({name:'Comentário → link', channel:'instagram', trigger:'comment', matchMode:'contains', keywords:['quero'], publicReplies:['Te mandei no direct! 📩','Olha sua DM 😉'], oncePerContact:false, enabled:true,
-    flow:{start:'inicio', nodes:[
-      {id:'inicio', type:'message', text:'Oi {{first_name}}! Que bom que você se interessou 😊 Clica no botão pra receber o link:', buttons:[{title:'Quero o link', next:'link'}]},
-      {id:'link', type:'message', text:'Aqui está: https://seusite.com.br', next:'marcar'},
-      {id:'marcar', type:'tag', add:['recebeu-link']}]}}),
+    flow:{start:'marcar', nodes:[
+      {id:'marcar', type:'tag', add:['recebeu-link'], next:'inicio'},
+      {id:'inicio', type:'message', text:'Oi {{first_name}}! Que bom que você se interessou 😊 Toca no botão pra abrir:', buttons:[{title:'Quero o link', url:'https://seusite.com.br'}]}]}}),
   lead: () => ({name:'Captura de e-mail', channel:'instagram', trigger:'keyword', matchMode:'contains', keywords:['ebook'], publicReplies:[], oncePerContact:false, enabled:true,
     flow:{start:'inicio', nodes:[
       {id:'inicio', type:'message', text:'Oi {{first_name}}! Quer receber o e-book grátis?', buttons:[{title:'Sim, quero!', next:'email'},{title:'Agora não', next:'tchau'}]},
@@ -235,7 +234,10 @@ function renderNode(n, i){
   if (n.type==='message'){
     body += '<label>Botões (até 3 aparecem como botões; mais que isso vira lista/respostas rápidas, máx. '+maxBtn+')</label>'
       + (n.buttons||[]).map((b,j) => '<div class="row" style="margin-bottom:6px"><input data-btn="'+j+'" data-bk="title" maxlength="20" placeholder="Título (até 20 letras)" value="'+esc(b.title)+'">'
-        + '<div>'+nextSelect(b.next, 'data-btn="'+j+'" data-bk="next"')+'</div><button class="small auto" data-rmbtn="'+j+'">✕</button></div>').join('')
+        + '<div>'+(b.url ? '<span class="muted" style="font-size:13px">abre o link →</span>' : nextSelect(b.next, 'data-btn="'+j+'" data-bk="next"'))+'</div>'
+        + '<input data-btn="'+j+'" data-bk="url" data-rerender placeholder="ou abrir link: https://…" value="'+esc(b.url||'')+'">'
+        + '<button class="small auto" data-rmbtn="'+j+'">✕</button></div>').join('')
+      + '<p class="muted" style="font-size:12px;margin:2px 0 8px">Botão com link abre o site direto. Botão sem link leva para outro passo do fluxo.</p>'
       + ((n.buttons||[]).length < maxBtn ? '<button class="small" data-addbtn>+ botão</button>' : '');
   }
   if (n.type==='question'){
@@ -247,7 +249,7 @@ function renderNode(n, i){
     body += '<div class="row"><div><label>Adicionar tags (vírgula)</label><input data-k="add" value="'+esc((n.add||[]).join(', '))+'"></div>'
       + '<div><label>Remover tags (vírgula)</label><input data-k="remove" value="'+esc((n.remove||[]).join(', '))+'"></div></div>';
   }
-  const showNext = !(n.type==='message' && (n.buttons||[]).length);
+  const showNext = !(n.type==='message' && (n.buttons||[]).some(b => !b.url));
   if (showNext) body += '<label>Depois, ir para</label>'+nextSelect(n.next, 'data-k="next"');
   const label = {message:'mensagem', question:'pergunta', tag:'tag'}[n.type];
   return '<div class="node" data-i="'+i+'"><h4><span class="pill">'+label+'</span><input data-k="id" value="'+esc(n.id)+'" style="max-width:200px" title="Identificador do passo">'
@@ -273,8 +275,11 @@ function bindNodes(){
         n[k] = v;
       };
     });
-    el.querySelectorAll('[data-btn]').forEach(inp => inp.oninput = inp.onchange = () => {
-      n.buttons[+inp.dataset.btn][inp.dataset.bk] = inp.value || undefined;
+    el.querySelectorAll('[data-btn]').forEach(inp => inp.oninput = inp.onchange = (e) => {
+      const b = n.buttons[+inp.dataset.btn];
+      b[inp.dataset.bk] = inp.value.trim() || undefined;
+      if (inp.dataset.bk === 'url' && b.url) delete b.next;
+      if (inp.dataset.rerender !== undefined && e.type === 'change') renderEditor();
     });
     el.querySelectorAll('[data-rmbtn]').forEach(b => b.onclick = () => { n.buttons.splice(+b.dataset.rmbtn,1); renderEditor(); });
     const add = el.querySelector('[data-addbtn]'); if (add) add.onclick = () => { (n.buttons ||= []).push({title:''}); renderEditor(); };

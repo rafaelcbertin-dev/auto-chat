@@ -3,7 +3,10 @@ export type Channel = 'instagram' | 'whatsapp';
 /** Botão de um passo "message". `next` é o id do passo seguinte quando clicado. */
 export interface FlowButton {
   title: string;
+  /** Passo seguinte quando clicado (precisa do aviso de clique da Meta) */
   next?: string;
+  /** Link aberto direto pelo botão (não depende de aviso da Meta) */
+  url?: string;
 }
 
 export interface MessageNode {
@@ -97,7 +100,10 @@ export type InboundEvent = CommentEvent | MessageEvent;
 
 export interface OutButton {
   title: string;
-  payload: string;
+  /** Botão de resposta (postback) */
+  payload?: string;
+  /** Botão que abre um link */
+  url?: string;
 }
 
 export interface OutMessage {

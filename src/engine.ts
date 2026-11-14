@@ -5,6 +5,7 @@ import type {
   FlowNode,
   MessageEvent,
   InboundEvent,
+  OutMessage,
   QuestionNode,
   Recipient,
   Sender,
@@ -194,10 +195,10 @@ export class Engine {
       return true;
     }
 
-    if (node.type === 'message' && node.buttons?.length) {
+    if (node.type === 'message' && node.buttons?.some((b) => !b.url)) {
       // WhatsApp/Instagram às vezes chegam como texto: aceita o título do botão digitado
       const t = normalize(text);
-      const idx = node.buttons.findIndex((b) => normalize(b.title) === t);
+      const idx = node.buttons.findIndex((b) => !b.url && normalize(b.title) === t);
       if (idx >= 0) {
         await this.store.clearSession(contact.id);
         const next = node.buttons[idx].next;
@@ -262,11 +263,14 @@ export class Engine {
       }
 
       // message
-      const buttons = (node.buttons ?? []).map((b, i) => ({ title: b.title, payload: buttonPayload(a.id, node.id, i) }));
+      const buttons = (node.buttons ?? []).map((b, i) =>
+        b.url ? { title: b.title, url: renderTemplate(b.url, contact) } : { title: b.title, payload: buttonPayload(a.id, node.id, i) },
+      );
       const ok = await this.sendMessage(contact, to, { text: renderTemplate(node.text, contact), buttons });
       sent++;
       if (!ok) return;
-      if (buttons.length) {
+      // Só espera resposta se houver botão de resposta; botões de link não geram aviso
+      if (buttons.some((b) => b.payload)) {
         await this.store.setSession(contact.id, { automationId: a.id, nodeId: node.id });
         return;
       }
@@ -278,7 +282,7 @@ export class Engine {
     return this.sendMessage(contact, to, { text: renderTemplate(text, contact) });
   }
 
-  private async sendMessage(contact: Contact, to: Recipient, msg: { text: string; buttons?: { title: string; payload: string }[] }) {
+  private async sendMessage(contact: Contact, to: Recipient, msg: OutMessage) {
     try {
       await this.sender.send(contact.channel, to, msg);
       await this.store.logMessage(contact.id, 'out', msg.text, msg.buttons?.length ? { buttons: msg.buttons.map((b) => b.title) } : undefined);

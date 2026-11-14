@@ -316,3 +316,37 @@ describe('automation validation', () => {
     expect(ok.flow.start).toBe('a');
   });
 });
+
+describe('botões de link', () => {
+  it('envia botão web_url e não espera resposta', async () => {
+    const store = new MemStore();
+    const sender = new FakeSender();
+    store.automations.push(
+      auto({
+        trigger: 'comment',
+        keywords: ['meet'],
+        flow: { start: 'a', nodes: [{ id: 'a', type: 'message', text: 'Toca aí', buttons: [{ title: 'Quero o link', url: 'https://x.com/?u={{username}}' }] }] },
+      }),
+    );
+    await new Engine(store, sender, () => {}).handle({ kind: 'comment', channel: 'instagram', eventId: 'k', commentId: 'c', mediaId: null, text: 'Meet', from: { id: 'u', username: 'ana' } });
+    expect(sender.sent[0].msg.buttons).toEqual([{ title: 'Quero o link', url: 'https://x.com/?u=ana' }]);
+    expect(store.sessions.size).toBe(0);
+    expect(MetaSender.instagramMessage(sender.sent[0].msg)).toMatchObject({
+      attachment: { payload: { buttons: [{ type: 'web_url', url: 'https://x.com/?u=ana', title: 'Quero o link' }] } },
+    });
+  });
+
+  it('WhatsApp: um link vira cta_url; link com respostas vai para o texto', () => {
+    expect(MetaSender.whatsappMessage('55', { text: 'oi', buttons: [{ title: 'Site', url: 'https://x.com' }] })).toMatchObject({
+      interactive: { type: 'cta_url', action: { parameters: { url: 'https://x.com' } } },
+    });
+    const m = MetaSender.whatsappMessage('55', { text: 'oi', buttons: [{ title: 'Site', url: 'https://x.com' }, { title: 'Preço', payload: 'p' }] }) as any;
+    expect(m.interactive.type).toBe('button');
+    expect(m.interactive.body.text).toContain('Site: https://x.com');
+    expect(m.interactive.action.buttons).toHaveLength(1);
+  });
+
+  it('valida que o link começa com http', () => {
+    expect(() => validateAutomation({ name: 'x', keywords: ['a'], flow: { nodes: [{ id: 'a', type: 'message', text: 'oi', buttons: [{ title: 'b', url: 'site.com' }] }] } })).toThrow(/https/);
+  });
+});

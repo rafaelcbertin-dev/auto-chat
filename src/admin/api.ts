@@ -24,7 +24,17 @@ export function validateFlow(raw: any): Flow {
       if (!String(n.text ?? '').trim()) throw new ValidationError(`Passo "${id}": texto vazio`);
       const buttons = Array.isArray(n.buttons)
         ? n.buttons
-            .map((b: any) => ({ title: String(b?.title ?? '').trim(), next: b?.next ? String(b.next) : undefined }))
+            .map((b: any) => {
+              const title = String(b?.title ?? '').trim();
+              const url = String(b?.url ?? '').trim();
+              if (url) {
+                if (!/^https?:\/\/\S+$/i.test(url.replace(/\{\{\s*[\w.]+\s*\}\}/g, 'x'))) {
+                  throw new ValidationError(`Passo "${id}": o link do botão "${title}" precisa começar com https://`);
+                }
+                return { title, url };
+              }
+              return { title, next: b?.next ? String(b.next) : undefined };
+            })
             .filter((b: any) => b.title)
         : [];
       return { id, type: 'message', text: String(n.text), buttons, next };
