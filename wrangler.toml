@@ -22,6 +22,7 @@ migrations_dir = "migrations"
 #   ADMIN_PASSWORD      senha do painel
 #   META_VERIFY_TOKEN   texto qualquer, igual ao configurado no webhook da Meta
 #   META_APP_SECRET     Chave secreta do app da Meta (Configurações do app › Básico)
+#   AUTOCHAT_API_KEY    chave (32+ caracteres) da aba AutoChat do painel da Revenda; a mesma vai no Worker da Revenda
 #   (o acesso ao Instagram é feito pelo botão "Conectar Instagram" no painel)
 #   WA_ACCESS_TOKEN     token permanente do usuário de sistema (WhatsApp Cloud API)
 #   WA_PHONE_NUMBER_ID  ID do número no WhatsApp Cloud API

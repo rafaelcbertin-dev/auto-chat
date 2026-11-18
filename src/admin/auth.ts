@@ -22,6 +22,18 @@ export async function isLoggedIn(req: Request, password: string | undefined): Pr
   return timingSafeEqual(raw, await sign(password, expires));
 }
 
+/**
+ * Acesso de outro sistema (painel de Gestão da Revenda) à API: cabeçalho
+ * `Authorization: Bearer <AUTOCHAT_API_KEY>`. Desligado se a chave não existir
+ * ou tiver menos de 32 caracteres.
+ */
+export function hasApiKey(req: Request, key: string | undefined): boolean {
+  if (!key || key.length < 32) return false;
+  const auth = req.headers.get('Authorization') ?? '';
+  if (!auth.startsWith('Bearer ')) return false;
+  return timingSafeEqual(auth.slice(7).trim(), key);
+}
+
 export async function loginResponse(req: Request, password: string | undefined): Promise<Response> {
   const form = await req.formData().catch(() => null);
   const given = String(form?.get('password') ?? '');

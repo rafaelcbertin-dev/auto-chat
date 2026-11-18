@@ -1,5 +1,5 @@
 import { handleApi } from './admin/api';
-import { isLoggedIn, loginResponse, logoutResponse } from './admin/auth';
+import { hasApiKey, isLoggedIn, loginResponse, logoutResponse } from './admin/auth';
 import { appPage, loginPage, messagePage, privacyPage, dataDeletionPage } from './admin/ui';
 import { MetaSender } from './channels/meta';
 import { D1Store } from './db';
@@ -15,6 +15,8 @@ export interface Env {
   /** Identificação da configuração do "login unificado" (público) */
   META_LOGIN_CONFIG_ID?: string;
   ADMIN_PASSWORD?: string;
+  /** Chave da API para o painel de Gestão da Revenda (mínimo 32 caracteres) */
+  AUTOCHAT_API_KEY?: string;
   META_VERIFY_TOKEN?: string;
   META_APP_SECRET?: string;
   IG_APP_SECRET?: string;
@@ -151,7 +153,9 @@ export default {
     }
     if (p === '/logout') return logoutResponse();
 
-    if (!(await isLoggedIn(req, env.ADMIN_PASSWORD))) {
+    // O painel da Revenda usa só a API, com a chave AUTOCHAT_API_KEY
+    const viaApiKey = p.startsWith('/api/') && hasApiKey(req, env.AUTOCHAT_API_KEY);
+    if (!viaApiKey && !(await isLoggedIn(req, env.ADMIN_PASSWORD))) {
       if (p.startsWith('/api/')) return Response.json({ error: 'Não autenticado' }, { status: 401 });
       return new Response(null, { status: 303, headers: { Location: '/login' } });
     }
