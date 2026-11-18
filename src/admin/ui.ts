@@ -103,11 +103,16 @@ addEventListener('hashchange', route);
 async function viewDashboard(){
   const [s, ig] = await Promise.all([api('/stats'), api('/instagram')]);
   const hook = location.origin + '/webhook';
+  const accs = ig.accounts || [];
   const igCard = '<div class="card"><h3 style="margin-top:0">Instagram</h3>'
-    + (ig.connected
-      ? '<p>✅ Conectado'+(ig.username ? ' como <b>@'+esc(ig.username)+'</b>' : '')+(ig.connectedAt ? ' <span class="muted">desde '+fmt(ig.connectedAt)+'</span>' : '')+'</p>'
-        + (ig.subscribeWarning ? '<p style="color:var(--err)">A conta conectou, mas a inscrição nos avisos da Meta falhou: '+esc(ig.subscribeWarning)+'. Tente "Reconectar".</p>' : '')
-        + '<div class="row"><a class="btn auto" href="/connect/instagram">Reconectar</a><button class="auto danger" id="igoff">Desconectar</button></div>'
+    + (accs.length
+      ? accs.map(c => '<div class="row" style="align-items:center"><div><p style="margin:4px 0">✅ <b>@'+esc(c.username||c.accountId)+'</b>'+(c.connectedAt ? ' <span class="muted">desde '+fmt(c.connectedAt)+'</span>' : '')+'</p>'
+          + (c.subscribeWarning ? '<p style="color:var(--err);margin:4px 0">A conta conectou, mas a inscrição nos avisos da Meta falhou: '+esc(c.subscribeWarning)+'. Tente "Reconectar".</p>' : '')
+          + '</div><button class="auto danger small" data-igoff="'+esc(c.accountId)+'" data-name="'+esc(c.username||c.accountId)+'">Desconectar</button></div>').join('')
+        + '<p class="muted" style="font-size:13px">Para conectar outra conta (ex.: a da Ampliar), entre com um perfil do Facebook que administre a Página ligada a ela e marque <b>as duas contas</b> na tela da Meta.</p>'
+        + '<div class="row"><a class="btn auto" href="/connect/instagram">Conectar outra conta / reconectar</a></div>'
+      : ig.connected
+      ? '<p>✅ Conectado pelo token antigo (IG_ACCESS_TOKEN).</p><div class="row"><a class="btn auto" href="/connect/instagram">Conectar pelo login da Meta</a></div>'
       : (ig.canConnect
         ? '<p class="muted">Clique abaixo, entre com a conta da empresa e selecione o Instagram. O AutoChat guarda o acesso sozinho.</p><a class="btn" href="/connect/instagram" style="display:inline-block;background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600">Conectar Instagram</a>'
         : '<p style="color:var(--err)">Faltam META_APP_ID e META_LOGIN_CONFIG_ID na configuração.</p>'))
@@ -123,21 +128,28 @@ async function viewDashboard(){
     + '<p class="muted">Política de privacidade (para publicar o app): <code>'+esc(location.origin)+'/privacidade</code><br>Exclusão de dados: <code>'+esc(location.origin)+'/exclusao-de-dados</code></p>'
     + (s.errors24h ? '<p style="color:var(--err)">Houve erros de envio nas últimas 24h — abra o contato em <a href="#contatos">Contatos</a> para ver o detalhe.</p>' : '')
     + '</div>';
-  const off = $('#igoff');
-  if (off) off.onclick = async () => { if (!confirm('Desconectar o Instagram? As automações param de responder.')) return; await api('/instagram', {method:'DELETE'}); route(); };
+  app.querySelectorAll('[data-igoff]').forEach(b => b.onclick = async () => {
+    if (!confirm('Desconectar @'+b.dataset.name+'? As automações dessa conta param de responder.')) return;
+    await api('/instagram?account='+encodeURIComponent(b.dataset.igoff), {method:'DELETE'}); route();
+  });
 }
+
+// Contas conectadas (para o seletor do editor e a lista de automações)
+let IGS = null;
+async function igAccounts(){ if (!IGS) IGS = (await api('/instagram')).accounts || []; return IGS; }
+const accName = (id) => { const c = (IGS||[]).find(x => x.accountId === id); return c ? '@'+(c.username||c.accountId) : (id ? 'conta '+id : 'todas as contas'); };
 
 // ---------------- Automações ----------------
 const TRIG = {comment:'Comentário → DM', keyword:'Palavra-chave na DM'};
 const CH = {instagram:'Instagram', whatsapp:'WhatsApp'};
 async function viewAutomations(){
-  const list = await api('/automations');
+  const [list] = await Promise.all([api('/automations'), igAccounts()]);
   app.innerHTML = '<div class="row" style="margin-bottom:12px"><h2 style="margin:0">Automações</h2>'
     + '<select class="auto" id="tpl"><option value="">+ Nova automação…</option><option value="comment">Comentário → DM com link</option>'
     + '<option value="lead">Captura de e-mail (com botões)</option><option value="wa">WhatsApp: menu com botões</option><option value="default">Resposta padrão</option><option value="blank">Em branco</option></select></div>'
     + (list.length ? '<div class="card"><table><tr><th>Nome</th><th>Canal / gatilho</th><th>Palavras</th><th>Disparos</th><th></th></tr>'
       + list.map(a => '<tr class="click" data-id="'+a.id+'"><td><b>'+esc(a.name)+'</b>'+(a.enabled?'':' <span class="pill">pausada</span>')+'</td>'
-        + '<td>'+CH[a.channel]+' · '+TRIG[a.trigger]+'</td><td>'+(a.matchMode==='any'?'<i class="muted">qualquer mensagem</i>':a.keywords.map(k=>'<span class="chip">'+esc(k)+'</span>').join(''))+'</td>'
+        + '<td>'+CH[a.channel]+' · '+TRIG[a.trigger]+(a.channel==='instagram' && (IGS||[]).length>1 ? '<br><span class="muted">'+esc(accName(a.accountId))+'</span>' : '')+'</td><td>'+(a.matchMode==='any'?'<i class="muted">qualquer mensagem</i>':a.keywords.map(k=>'<span class="chip">'+esc(k)+'</span>').join(''))+'</td>'
         + '<td>'+a.runs+'</td><td class="auto"><button class="small" data-toggle="'+a.id+'">'+(a.enabled?'Pausar':'Ativar')+'</button></td></tr>').join('')
       + '</table></div>' : '<div class="card muted">Nenhuma automação ainda. Comece por um modelo acima.</div>');
   $('#tpl').onchange = (e) => { if (e.target.value) location.hash = 'automacoes/novo-'+e.target.value; };
@@ -175,8 +187,12 @@ const TEMPLATES = {
 
 let A = null; // automação em edição
 async function viewEditor(arg){
-  if (arg.startsWith('novo-')) A = TEMPLATES[arg.slice(5)]?.() || TEMPLATES.blank();
-  else A = await api('/automations/'+arg);
+  await igAccounts();
+  if (arg.startsWith('novo-')) {
+    A = TEMPLATES[arg.slice(5)]?.() || TEMPLATES.blank();
+    // Nova automação do Instagram começa na primeira conta conectada
+    if (A.channel === 'instagram' && IGS.length) A.accountId = IGS[0].accountId;
+  } else A = await api('/automations/'+arg);
   renderEditor();
 }
 
@@ -192,6 +208,9 @@ function renderEditor(){
     + '<div class="row"><div><label>Canal</label><select id="f-channel"><option value="instagram">Instagram</option><option value="whatsapp">WhatsApp</option></select></div>'
     + '<div><label>Gatilho</label><select id="f-trigger"><option value="keyword">Palavra-chave na DM</option>'+(a.channel==='instagram'?'<option value="comment">Comentário em post/reels</option>':'')+'</select></div>'
     + '<div><label>Disparar quando</label><select id="f-match"><option value="contains">contém a palavra</option><option value="exact">é exatamente a palavra</option><option value="any">qualquer mensagem</option></select></div></div>'
+    + (a.channel==='instagram' && (IGS||[]).length ? '<label>Conta do Instagram</label><select id="f-account">'
+      + IGS.map(c => '<option value="'+esc(c.accountId)+'"'+(c.accountId===a.accountId?' selected':'')+'>@'+esc(c.username||c.accountId)+'</option>').join('')
+      + '<option value=""'+(a.accountId?'':' selected')+'>Todas as contas</option></select>' : '')
     + (a.matchMode!=='any' ? '<label>Palavras-chave (separadas por vírgula)</label><input id="f-keywords" value="'+esc(a.keywords.join(', '))+'">' : '')
     + (a.trigger==='comment' ? '<label>ID do post (opcional — vazio = qualquer post)</label><input id="f-media" value="'+esc(a.mediaId||'')+'">'
       + '<label>Respostas públicas no comentário (uma por linha, sorteada; vazio = não responde)</label><textarea id="f-public">'+esc(a.publicReplies.join('\n'))+'</textarea>' : '')
@@ -211,6 +230,7 @@ function renderEditor(){
   bind('#f-once', e => a.oncePerContact = e.target.checked);
   bind('#f-keywords', e => a.keywords = e.target.value.split(',').map(s=>s.trim()).filter(Boolean));
   bind('#f-media', e => a.mediaId = e.target.value.trim() || null);
+  bind('#f-account', e => a.accountId = e.target.value || null);
   bind('#f-public', e => a.publicReplies = e.target.value.split('\n').map(s=>s.trim()).filter(Boolean));
   bind('#f-start', e => a.flow.start = e.target.value);
   $('#f-channel').onchange = e => { a.channel = e.target.value; if (a.channel==='whatsapp') a.trigger='keyword'; renderEditor(); };

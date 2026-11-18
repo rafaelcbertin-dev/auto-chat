@@ -79,10 +79,24 @@ export function validateAutomation(raw: any): Omit<Automation, 'id'> {
     publicReplies: trigger === 'comment' ? strList(raw.publicReplies) : [],
     oncePerContact: !!raw.oncePerContact,
     flow: validateFlow(raw.flow),
+    accountId: validateAccountId(channel === 'instagram' ? raw.accountId : null),
   };
 }
 
-export async function handleApi(req: Request, url: URL, store: D1Store, sender: Sender): Promise<Response> {
+/** ID da conta profissional do Instagram (só dígitos) ou null = todas as contas. */
+export function validateAccountId(v: unknown): string | null {
+  if (v === undefined || v === null || v === '') return null;
+  const s = String(v).trim();
+  if (!/^\d{1,30}$/.test(s)) throw new ValidationError('Conta do Instagram inválida');
+  return s;
+}
+
+export async function handleApi(
+  req: Request,
+  url: URL,
+  store: D1Store,
+  senderFor: (accountId?: string | null) => Promise<Sender>,
+): Promise<Response> {
   const path = url.pathname.replace(/^\/api/, '');
   const m = req.method;
   try {
@@ -120,6 +134,7 @@ export async function handleApi(req: Request, url: URL, store: D1Store, sender: 
           q: p.get('q') || undefined,
           tag: p.get('tag') || undefined,
           channel: p.get('channel') || undefined,
+          account: p.get('account') || undefined,
           offset: Number(p.get('offset') || 0),
         }),
       );
@@ -148,6 +163,8 @@ export async function handleApi(req: Request, url: URL, store: D1Store, sender: 
           return json({ error: 'Fora da janela de 24h: a Meta só permite responder até 24h após a última mensagem da pessoa.' }, 400);
         }
         try {
+          // Responde pela conta com que a pessoa falou por último
+          const sender = await senderFor(contact.channel === 'instagram' ? contact.accountId : null);
           await sender.send(contact.channel, { userId: contact.externalId }, { text });
           await store.logMessage(id, 'out', text, { manual: true });
         } catch (e) {

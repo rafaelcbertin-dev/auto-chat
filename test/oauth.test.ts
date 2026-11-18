@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { getAccounts, LEGACY_KEY, mergeAccounts, pickAccount, publicAccount, saveAccounts } from '../src/accounts';
 import { MetaSender } from '../src/channels/meta';
 import { buildLoginUrl, checkState, completeConnection, makeState } from '../src/oauth';
 
@@ -40,7 +41,8 @@ describe('login unificado', () => {
       calls,
     );
     const c = await completeConnection({ code: 'C', appId: 'A', appSecret: 'S', redirectUri: 'https://x.dev/', version: 'v26.0', fetch: f });
-    expect(c).toMatchObject({ token: 'TOK', accountId: '178', username: 'terravo', subscribeWarning: null });
+    expect(c).toHaveLength(1);
+    expect(c[0]).toMatchObject({ token: 'TOK', accountId: '178', username: 'terravo', subscribeWarning: null });
     expect(calls[0].url).toContain('graph.facebook.com/v26.0/oauth/access_token');
     expect(calls[0].url).toContain('client_secret=S');
     expect((calls[1].init?.headers as Record<string, string>).Authorization).toBe('Bearer TOK');
@@ -55,7 +57,55 @@ describe('login unificado', () => {
   it('se a inscrição falhar, a conexão continua com aviso', async () => {
     const f = fakeFetch({ '/oauth/access_token': { access_token: 'T' }, '/me/assigned_instagram_accounts': { data: [{ id: '1' }] } }, []);
     const c = await completeConnection({ code: 'C', appId: 'A', appSecret: 'S', redirectUri: 'r', version: 'v26.0', fetch: f });
-    expect(c.subscribeWarning).toMatch(/rota inesperada/);
+    expect(c[0].subscribeWarning).toMatch(/rota inesperada/);
+  });
+
+  it('duas contas compartilhadas de uma vez: as duas entram e são inscritas', async () => {
+    const calls: Call[] = [];
+    const f = fakeFetch(
+      {
+        '/oauth/access_token': { access_token: 'TOK' },
+        '/me/assigned_instagram_accounts': { data: [{ id: '178', username: 'terravoorigem' }, { id: '299', username: 'ampliar' }] },
+        '/178/subscribed_apps': { success: true },
+        '/299/subscribed_apps': { success: true },
+      },
+      calls,
+    );
+    const c = await completeConnection({ code: 'C', appId: 'A', appSecret: 'S', redirectUri: 'r', version: 'v26.0', fetch: f });
+    expect(c.map((x) => x.username)).toEqual(['terravoorigem', 'ampliar']);
+    expect(calls.filter((x) => x.url.includes('subscribed_apps')).map((x) => x.url.split('/')[4])).toEqual(['178', '299']);
+  });
+});
+
+describe('várias contas', () => {
+  const conn = (accountId: string, username: string, token = 'T' + accountId) => ({ token, accountId, username, connectedAt: 1 });
+
+  it('conectar outra conta mantém as existentes; reconectar a mesma troca só o token dela', () => {
+    const a = mergeAccounts([conn('178', 'terravoorigem')], [conn('299', 'ampliar')]);
+    expect(a.map((x) => x.accountId)).toEqual(['178', '299']);
+    const b = mergeAccounts(a, [conn('178', 'terravoorigem', 'NOVO')]);
+    expect(b.map((x) => x.token)).toEqual(['NOVO', 'T299']);
+  });
+
+  it('escolhe a conta pelo ID e nunca cai em outra conta', () => {
+    const list = [conn('178', 'terravoorigem'), conn('299', 'ampliar')];
+    expect(pickAccount(list, '299')?.username).toBe('ampliar');
+    expect(pickAccount(list)?.username).toBe('terravoorigem');
+    expect(pickAccount(list, '555')).toBeUndefined();
+  });
+
+  it('lê a conexão antiga (uma conta só) e a substitui pela lista ao salvar', async () => {
+    const data = new Map<string, unknown>([[LEGACY_KEY, conn('178', 'terravoorigem')]]);
+    const store = {
+      getSetting: async <T>(k: string) => (data.get(k) ?? null) as T | null,
+      setSetting: async (k: string, v: unknown) => void data.set(k, v),
+      deleteSetting: async (k: string) => void data.delete(k),
+    };
+    expect((await getAccounts(store)).map((x) => x.accountId)).toEqual(['178']);
+    await saveAccounts(store, mergeAccounts(await getAccounts(store), [conn('299', 'ampliar')]));
+    expect(data.has(LEGACY_KEY)).toBe(false);
+    expect((await getAccounts(store)).map((x) => x.username)).toEqual(['terravoorigem', 'ampliar']);
+    expect(publicAccount(conn('1', 'x'))).not.toHaveProperty('token');
   });
 });
 

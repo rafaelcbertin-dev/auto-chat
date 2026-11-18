@@ -27,6 +27,7 @@ export function rowToAutomation(r: any): Automation {
     publicReplies: parseJSON(r.public_replies, []),
     oncePerContact: !!r.once_per_contact,
     flow: parseJSON(r.flow, { start: '', nodes: [] }),
+    accountId: r.account_id || null,
   };
 }
 
@@ -41,6 +42,7 @@ function rowToContact(r: any, tags: string[]): Contact {
     email: r.email,
     fields: parseJSON(r.fields, {}),
     tags,
+    accountId: r.account_id || null,
   };
 }
 
@@ -55,25 +57,30 @@ export class D1Store implements Store {
     return (r.meta.changes ?? 0) > 0;
   }
 
-  async upsertContact(channel: Channel, externalId: string, info: { username?: string; name?: string; phone?: string }) {
+  async upsertContact(channel: Channel, externalId: string, info: { username?: string; name?: string; phone?: string; accountId?: string }) {
     const existing = await this.db.prepare('SELECT * FROM contacts WHERE channel = ? AND external_id = ?').bind(channel, externalId).first<any>();
     if (existing) {
       const username = info.username ?? existing.username;
       const name = existing.name ?? info.name ?? null;
       const phone = existing.phone ?? info.phone ?? null;
-      if (username !== existing.username || name !== existing.name || phone !== existing.phone) {
-        await this.db.prepare('UPDATE contacts SET username = ?, name = ?, phone = ? WHERE id = ?').bind(username, name, phone, existing.id).run();
+      const accountId = info.accountId ?? existing.account_id ?? null;
+      if (username !== existing.username || name !== existing.name || phone !== existing.phone || accountId !== (existing.account_id ?? null)) {
+        await this.db
+          .prepare('UPDATE contacts SET username = ?, name = ?, phone = ?, account_id = ? WHERE id = ?')
+          .bind(username, name, phone, accountId, existing.id)
+          .run();
       }
-      return { ...rowToContact({ ...existing, username, name, phone }, await this.tags(existing.id)), isNew: false };
+      return { ...rowToContact({ ...existing, username, name, phone, account_id: accountId }, await this.tags(existing.id)), isNew: false };
     }
     const row = await this.db
       .prepare(
-        `INSERT INTO contacts (channel, external_id, username, name, phone, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(channel, external_id) DO UPDATE SET username = COALESCE(excluded.username, contacts.username)
+        `INSERT INTO contacts (channel, external_id, username, name, phone, account_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(channel, external_id) DO UPDATE SET username = COALESCE(excluded.username, contacts.username),
+           account_id = COALESCE(excluded.account_id, contacts.account_id)
          RETURNING *`,
       )
-      .bind(channel, externalId, info.username ?? null, info.name ?? null, info.phone ?? null, now())
+      .bind(channel, externalId, info.username ?? null, info.name ?? null, info.phone ?? null, info.accountId ?? null, now())
       .first<any>();
     return { ...rowToContact(row, []), isNew: true };
   }
@@ -187,13 +194,14 @@ export class D1Store implements Store {
       JSON.stringify(a.publicReplies),
       a.oncePerContact ? 1 : 0,
       JSON.stringify(a.flow),
+      a.accountId || null,
       now(),
     ];
     if (a.id) {
       await this.db
         .prepare(
           `UPDATE automations SET name=?, enabled=?, channel=?, trigger_type=?, keywords=?, match_mode=?, media_id=?,
-           public_replies=?, once_per_contact=?, flow=?, updated_at=? WHERE id=?`,
+           public_replies=?, once_per_contact=?, flow=?, account_id=?, updated_at=? WHERE id=?`,
         )
         .bind(...vals, a.id)
         .run();
@@ -202,7 +210,7 @@ export class D1Store implements Store {
     const r = await this.db
       .prepare(
         `INSERT INTO automations (name, enabled, channel, trigger_type, keywords, match_mode, media_id, public_replies,
-         once_per_contact, flow, updated_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
+         once_per_contact, flow, account_id, updated_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
       )
       .bind(...vals, now())
       .first<{ id: number }>();
@@ -217,7 +225,7 @@ export class D1Store implements Store {
     ]);
   }
 
-  async listContacts(opts: { q?: string; tag?: string; channel?: string; limit?: number; offset?: number }) {
+  async listContacts(opts: { q?: string; tag?: string; channel?: string; account?: string; limit?: number; offset?: number }) {
     const where: string[] = [];
     const args: unknown[] = [];
     if (opts.q) {
@@ -232,6 +240,10 @@ export class D1Store implements Store {
     if (opts.channel) {
       where.push('c.channel = ?');
       args.push(opts.channel);
+    }
+    if (opts.account) {
+      where.push('c.account_id = ?');
+      args.push(opts.account);
     }
     const sql = `SELECT c.*, (SELECT group_concat(tag, '\u001f') FROM contact_tags t WHERE t.contact_id = c.id) AS tag_list
       FROM contacts c ${where.length ? 'WHERE ' + where.join(' AND ') : ''}

@@ -19,6 +19,8 @@ function parseInstagram(body: any): InboundEvent[] {
   const out: InboundEvent[] = [];
   for (const entry of body.entry ?? []) {
     const ownId = String(entry.id ?? '');
+    // Com várias contas conectadas, entry.id diz qual conta recebeu o evento
+    const accountId = ownId || undefined;
 
     for (const m of entry.messaging ?? []) {
       const senderId = String(m.sender?.id ?? '');
@@ -35,6 +37,7 @@ function parseInstagram(body: any): InboundEvent[] {
           text,
           payload,
           from: { id: senderId },
+          accountId,
         });
       } else if (m.postback) {
         out.push({
@@ -44,6 +47,7 @@ function parseInstagram(body: any): InboundEvent[] {
           text: m.postback.title ?? '',
           payload: m.postback.payload,
           from: { id: senderId },
+          accountId,
         });
       }
     }
@@ -61,6 +65,7 @@ function parseInstagram(body: any): InboundEvent[] {
         mediaId: v.media?.id ? String(v.media.id) : null,
         text: v.text ?? '',
         from: { id: fromId, username: v.from?.username },
+        accountId,
       });
     }
   }

@@ -86,6 +86,11 @@ function findNode(a: Automation, id: string | undefined): FlowNode | undefined {
   return a.flow.nodes.find((n) => n.id === id);
 }
 
+/** Automação vale para a conta do evento? (sem conta definida = vale para todas) */
+export function forAccount(list: Automation[], accountId: string | undefined): Automation[] {
+  return list.filter((a) => !a.accountId || !accountId || a.accountId === accountId);
+}
+
 export class Engine {
   constructor(
     private store: Store,
@@ -100,6 +105,7 @@ export class Engine {
       username: ev.from.username,
       name: ev.kind === 'message' ? ev.from.name : undefined,
       phone: ev.channel === 'whatsapp' ? ev.from.id : undefined,
+      accountId: ev.accountId,
     });
 
     if (contact.isNew && ev.channel === 'instagram' && !contact.username && this.sender.fetchInstagramProfile) {
@@ -116,7 +122,7 @@ export class Engine {
   private async onComment(contact: Contact, ev: CommentEvent) {
     await this.store.logMessage(contact.id, 'in', ev.text, { type: 'comment', commentId: ev.commentId, mediaId: ev.mediaId });
 
-    const automations = (await this.store.listAutomations('instagram', 'comment')).filter(
+    const automations = forAccount(await this.store.listAutomations('instagram', 'comment'), ev.accountId).filter(
       (a) => !a.mediaId || a.mediaId === ev.mediaId,
     );
     const best = this.pickBest(automations, ev.text);
@@ -159,16 +165,17 @@ export class Engine {
     if (session) {
       const a = await this.store.getAutomation(session.automationId);
       const node = a && findNode(a, session.nodeId);
-      if (a && node) {
-        const handled = await this.continueSession(a, node, contact, to, ev.text);
+      // Conversa aberta com outra conta do Instagram não captura esta mensagem
+      if (a && node && forAccount([a], ev.accountId).length) {
+        const handled = await this.continueSession(a, node, contact, to, ev.text, ev.accountId);
         if (handled) return;
-      } else {
+      } else if (!a || !node) {
         await this.store.clearSession(contact.id);
       }
     }
 
     // 3) Palavra-chave
-    const best = this.pickBest(await this.store.listAutomations(ev.channel, 'keyword'), ev.text);
+    const best = this.pickBest(forAccount(await this.store.listAutomations(ev.channel, 'keyword'), ev.accountId), ev.text);
     if (!best) return;
     if (best.oncePerContact && (await this.store.hasRun(best.id, contact.id))) return;
     await this.store.recordRun(best.id, contact.id);
@@ -176,10 +183,10 @@ export class Engine {
   }
 
   /** Retorna true se a mensagem foi consumida pela sessão atual. */
-  private async continueSession(a: Automation, node: FlowNode, contact: Contact, to: Recipient, text: string) {
+  private async continueSession(a: Automation, node: FlowNode, contact: Contact, to: Recipient, text: string, accountId?: string) {
     if (node.type === 'question') {
       // Se a pessoa mandou uma palavra-chave específica, deixa a outra automação assumir
-      const other = this.pickBest(await this.store.listAutomations(contact.channel, 'keyword'), text);
+      const other = this.pickBest(forAccount(await this.store.listAutomations(contact.channel, 'keyword'), accountId), text);
       if (other && other.matchMode !== 'any' && other.id !== a.id) {
         await this.store.clearSession(contact.id);
         return false;
