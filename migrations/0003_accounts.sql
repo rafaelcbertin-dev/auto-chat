@@ -12,8 +12,9 @@ UPDATE contacts
    SET account_id = (SELECT json_extract(value, '$.accountId') FROM settings WHERE key = 'instagram_connection')
  WHERE channel = 'instagram';
 
--- A conexão única vira a lista de contas.
+-- A conexão única vira a lista de contas. A chave antiga fica até o código novo
+-- salvar a lista (saveAccounts apaga a antiga), para a versão no ar seguir
+-- funcionando entre a migração e o deploy.
 INSERT INTO settings (key, value, updated_at)
 SELECT 'instagram_accounts', json_array(json(value)), updated_at FROM settings WHERE key = 'instagram_connection'
 ON CONFLICT(key) DO NOTHING;
-DELETE FROM settings WHERE key = 'instagram_connection';
