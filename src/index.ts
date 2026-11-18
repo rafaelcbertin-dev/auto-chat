@@ -1,10 +1,11 @@
 import { handleApi } from './admin/api';
-import { isLoggedIn, loginResponse, logoutResponse } from './admin/auth';
+import { hasApiKey, isLoggedIn, loginResponse, logoutResponse } from './admin/auth';
 import { appPage, loginPage, messagePage, privacyPage, dataDeletionPage } from './admin/ui';
 import { MetaSender } from './channels/meta';
 import { D1Store } from './db';
 import { Engine } from './engine';
-import { buildLoginUrl, checkState, completeConnection, makeState, type InstagramConnection } from './oauth';
+import { getAccounts, mergeAccounts, pickAccount, publicAccount, saveAccounts } from './accounts';
+import { buildLoginUrl, checkState, completeConnection, makeState } from './oauth';
 import { parseWebhook, timingSafeEqual, verifySignature } from './webhook';
 
 export interface Env {
@@ -15,6 +16,8 @@ export interface Env {
   /** Identificação da configuração do "login unificado" (público) */
   META_LOGIN_CONFIG_ID?: string;
   ADMIN_PASSWORD?: string;
+  /** Chave da API para o painel de Gestão da Revenda (mínimo 32 caracteres) */
+  AUTOCHAT_API_KEY?: string;
   META_VERIFY_TOKEN?: string;
   META_APP_SECRET?: string;
   IG_APP_SECRET?: string;
@@ -26,7 +29,6 @@ export interface Env {
   ALLOW_UNSIGNED_WEBHOOKS?: string;
 }
 
-const IG_SETTING = 'instagram_connection';
 
 const html = (body: string, status = 200) =>
   new Response(body, {
@@ -40,13 +42,17 @@ const html = (body: string, status = 200) =>
 
 const version = (env: Env) => env.GRAPH_API_VERSION || 'v26.0';
 
-async function sender(env: Env, store: D1Store) {
-  const conn = await store.getSetting<InstagramConnection>(IG_SETTING);
+/** Envio pela conta do Instagram indicada (sem conta: a primeira conectada). */
+async function sender(env: Env, store: D1Store, accountId?: string | null) {
+  const list = await getAccounts(store);
+  const conn = pickAccount(list, accountId);
+  // Sem nenhuma conta conectada, vale o token antigo (IG_ACCESS_TOKEN), se existir
+  const legacy = !list.length;
   return new MetaSender({
     version: version(env),
-    igToken: conn?.token ?? env.IG_ACCESS_TOKEN,
+    igToken: conn?.token ?? (legacy ? env.IG_ACCESS_TOKEN : undefined),
     igAccountId: conn?.accountId,
-    igHost: conn ? 'facebook' : 'instagram',
+    igHost: conn || !legacy ? 'facebook' : 'instagram',
     waToken: env.WA_ACCESS_TOKEN,
     waPhoneNumberId: env.WA_PHONE_NUMBER_ID,
   });
@@ -96,9 +102,10 @@ async function handleWebhook(req: Request, env: Env, ctx: ExecutionContext): Pro
     // Responde 200 na hora (a Meta exige resposta rápida) e processa em segundo plano
     ctx.waitUntil(
       (async () => {
-        const engine = new Engine(store, await sender(env, store));
         for (const ev of events) {
           try {
+            // Cada evento responde pela conta que o recebeu
+            const engine = new Engine(store, await sender(env, store, ev.channel === 'instagram' ? ev.accountId : null));
             await engine.handle(ev);
           } catch (e) {
             console.error('erro ao processar evento', ev.eventId, String(e));
@@ -121,14 +128,16 @@ async function handleOAuthCallback(url: URL, env: Env): Promise<Response> {
   }
   if (!env.META_APP_ID || !env.META_APP_SECRET) return fail('Faltam META_APP_ID ou META_APP_SECRET na configuração.');
   try {
-    const conn = await completeConnection({
+    const added = await completeConnection({
       code: url.searchParams.get('code')!,
       appId: env.META_APP_ID,
       appSecret: env.META_APP_SECRET,
       redirectUri: `${url.origin}/`,
       version: version(env),
     });
-    await new D1Store(env.DB).setSetting(IG_SETTING, conn);
+    // Conectar outra conta não desconecta as que já estão ligadas
+    const store = new D1Store(env.DB);
+    await saveAccounts(store, mergeAccounts(await getAccounts(store), added));
   } catch (e) {
     return fail(String(e instanceof Error ? e.message : e));
   }
@@ -151,7 +160,9 @@ export default {
     }
     if (p === '/logout') return logoutResponse();
 
-    if (!(await isLoggedIn(req, env.ADMIN_PASSWORD))) {
+    // O painel da Revenda usa só a API, com a chave AUTOCHAT_API_KEY
+    const viaApiKey = p.startsWith('/api/') && hasApiKey(req, env.AUTOCHAT_API_KEY);
+    if (!viaApiKey && !(await isLoggedIn(req, env.ADMIN_PASSWORD))) {
       if (p.startsWith('/api/')) return Response.json({ error: 'Não autenticado' }, { status: 401 });
       return new Response(null, { status: 303, headers: { Location: '/login' } });
     }
@@ -168,24 +179,31 @@ export default {
     if (p === '/' && url.searchParams.has('state')) return handleOAuthCallback(url, env);
 
     if (p === '/api/instagram' && req.method === 'GET') {
-      const conn = await store.getSetting<InstagramConnection>(IG_SETTING);
+      const list = await getAccounts(store);
+      const first = list[0];
       return Response.json({
-        connected: !!conn || !!env.IG_ACCESS_TOKEN,
-        username: conn?.username ?? null,
-        accountId: conn?.accountId ?? null,
-        connectedAt: conn?.connectedAt ?? null,
-        subscribeWarning: conn?.subscribeWarning ?? null,
+        connected: !!first || !!env.IG_ACCESS_TOKEN,
+        accounts: list.map(publicAccount),
+        // Campos da primeira conta (compatibilidade com o painel antigo)
+        username: first?.username ?? null,
+        accountId: first?.accountId ?? null,
+        connectedAt: first?.connectedAt ?? null,
+        subscribeWarning: first?.subscribeWarning ?? null,
         canConnect: !!(env.META_APP_ID && env.META_LOGIN_CONFIG_ID),
         hasAppSecret: !!(env.META_APP_SECRET || env.IG_APP_SECRET),
         whatsapp: !!(env.WA_ACCESS_TOKEN && env.WA_PHONE_NUMBER_ID),
       });
     }
     if (p === '/api/instagram' && req.method === 'DELETE') {
-      await store.deleteSetting(IG_SETTING);
+      // ?account=<id> desconecta só essa conta; sem o parâmetro, só vale com uma conta conectada
+      const list = await getAccounts(store);
+      const id = url.searchParams.get('account');
+      if (!id && list.length > 1) return Response.json({ error: 'Diga qual conta desconectar' }, { status: 400 });
+      await saveAccounts(store, id ? list.filter((a) => a.accountId !== id) : []);
       return Response.json({ ok: true });
     }
 
-    if (p.startsWith('/api/')) return handleApi(req, url, store, await sender(env, store));
+    if (p.startsWith('/api/')) return handleApi(req, url, store, (accountId) => sender(env, store, accountId));
     if (p === '/' || p === '/index.html') return html(appPage());
     return new Response('Not found', { status: 404 });
   },

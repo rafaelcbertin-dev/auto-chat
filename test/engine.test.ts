@@ -18,7 +18,7 @@ class MemStore implements Store {
     this.events.add(id);
     return true;
   }
-  async upsertContact(channel: Channel, externalId: string, info: { username?: string; name?: string; phone?: string }) {
+  async upsertContact(channel: Channel, externalId: string, info: { username?: string; name?: string; phone?: string; accountId?: string }) {
     let c = this.contacts.find((x) => x.channel === channel && x.externalId === externalId);
     const isNew = !c;
     if (!c) {
@@ -28,6 +28,7 @@ class MemStore implements Store {
     c.username = info.username ?? c.username;
     c.name = c.name ?? info.name ?? null;
     c.phone = c.phone ?? info.phone ?? null;
+    c.accountId = info.accountId ?? c.accountId ?? null;
     return { ...c, fields: { ...c.fields }, tags: [...c.tags], isNew };
   }
   get(id: number) {
@@ -221,6 +222,56 @@ describe('engine', () => {
     await new Engine(store, failing, () => {}).handle(ig('ebook'));
     expect(store.log.some((l) => l.dir === 'error' && l.text.includes('boom'))).toBe(true);
     expect(store.sessions.size).toBe(0);
+  });
+});
+
+describe('várias contas do Instagram', () => {
+  const msg = (id: string, text: string) => ({ start: id, nodes: [{ id, type: 'message' as const, text }] });
+  const comment = (eventId: string, text: string, accountId?: string) =>
+    ({ kind: 'comment', channel: 'instagram', eventId, commentId: 'k' + eventId, mediaId: null, text, from: { id: 'u9' }, accountId }) as const;
+
+  it('cada conta só dispara as próprias automações; sem conta definida vale para todas', async () => {
+    const store = new MemStore();
+    const sender = new FakeSender();
+    store.automations.push(
+      auto({ id: 1, trigger: 'comment', keywords: ['meet'], accountId: '178', flow: msg('a', 'Terravo Meet') }),
+      auto({ id: 2, trigger: 'comment', keywords: ['meet'], accountId: '299', flow: msg('b', 'Ampliar Meet') }),
+      auto({ id: 3, trigger: 'comment', keywords: ['oi'], accountId: null, flow: msg('c', 'Olá das duas') }),
+    );
+    const engine = new Engine(store, sender, () => {});
+    await engine.handle(comment('x1', 'meet', '299'));
+    await engine.handle(comment('x2', 'meet', '178'));
+    await engine.handle(comment('x3', 'oi', '299'));
+    expect(sender.sent.map((s) => s.msg.text)).toEqual(['Ampliar Meet', 'Terravo Meet', 'Olá das duas']);
+  });
+
+  it('palavra no Direct também respeita a conta, e o contato guarda a última conta', async () => {
+    const store = new MemStore();
+    const sender = new FakeSender();
+    store.automations.push(auto({ id: 1, keywords: ['preço'], accountId: '178', flow: msg('a', 'Preço Terravo') }));
+    const engine = new Engine(store, sender, () => {});
+    await engine.handle({ ...ig('preço'), accountId: '299' });
+    expect(sender.sent).toHaveLength(0);
+    await engine.handle({ ...ig('preço'), accountId: '178' });
+    expect(sender.sent.map((s) => s.msg.text)).toEqual(['Preço Terravo']);
+  });
+
+  it('webhook informa a conta (entry.id) em cada evento do Instagram', () => {
+    const evs = parseWebhook({
+      object: 'instagram',
+      entry: [
+        { id: '178', changes: [{ field: 'comments', value: { id: 'c1', text: 'meet', from: { id: 'u1' } } }] },
+        { id: '299', messaging: [{ sender: { id: 'u2' }, recipient: { id: '299' }, message: { mid: 'm1', text: 'oi' } }] },
+      ],
+    });
+    expect(evs.map((e) => e.accountId)).toEqual(['178', '299']);
+  });
+
+  it('valida a conta da automação', () => {
+    const base = { name: 'x', keywords: ['a'], flow: { nodes: [{ id: 'a', type: 'message', text: 'oi' }] } };
+    expect(validateAutomation({ ...base, accountId: '178' }).accountId).toBe('178');
+    expect(validateAutomation(base).accountId).toBeNull();
+    expect(() => validateAutomation({ ...base, accountId: '1; DROP' })).toThrow(/Conta/);
   });
 });
 

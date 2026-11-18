@@ -62,6 +62,8 @@ export interface Automation {
   publicReplies: string[];
   oncePerContact: boolean;
   flow: Flow;
+  /** Conta do Instagram (ID da conta profissional) em que a automação vale; null/ausente = todas */
+  accountId?: string | null;
 }
 
 export interface Contact {
@@ -74,6 +76,8 @@ export interface Contact {
   email: string | null;
   fields: Record<string, string>;
   tags: string[];
+  /** Última conta do Instagram com que a pessoa falou (as respostas manuais saem por ela) */
+  accountId?: string | null;
 }
 
 export interface CommentEvent {
@@ -84,6 +88,8 @@ export interface CommentEvent {
   mediaId: string | null;
   text: string;
   from: { id: string; username?: string };
+  /** Conta do Instagram que recebeu o comentário (entry.id do webhook) */
+  accountId?: string;
 }
 
 export interface MessageEvent {
@@ -94,6 +100,8 @@ export interface MessageEvent {
   /** Payload de botão/resposta rápida, quando o usuário clicou em um */
   payload?: string;
   from: { id: string; username?: string; name?: string };
+  /** Conta do Instagram que recebeu a mensagem (entry.id do webhook) */
+  accountId?: string;
 }
 
 export type InboundEvent = CommentEvent | MessageEvent;
@@ -131,7 +139,7 @@ export interface Store {
   upsertContact(
     channel: Channel,
     externalId: string,
-    info: { username?: string; name?: string; phone?: string },
+    info: { username?: string; name?: string; phone?: string; accountId?: string },
   ): Promise<Contact & { isNew: boolean }>;
   touchInbound(contactId: number): Promise<void>;
   updateContact(contactId: number, patch: { email?: string; phone?: string; name?: string; fields?: Record<string, string> }): Promise<void>;

@@ -12,7 +12,7 @@ Ferramenta própria de automação de Instagram e WhatsApp, parecida com o ManyC
 
 ## Segredos na Cloudflare (nunca no código nem no chat)
 
-`ADMIN_PASSWORD`, `META_VERIFY_TOKEN` (token de verificação do webhook), `META_APP_SECRET` (chave secreta do app da Meta). WhatsApp ainda não configurado: faltam `WA_ACCESS_TOKEN` e `WA_PHONE_NUMBER_ID`.
+`ADMIN_PASSWORD`, `META_VERIFY_TOKEN` (token de verificação do webhook), `META_APP_SECRET` (chave secreta do app da Meta), `AUTOCHAT_API_KEY` (mínimo 32 caracteres; dá acesso só à `/api/*` pelo cabeçalho `Authorization: Bearer`, usado pela aba **AutoChat** do painel de Gestão da Revenda no projeto-churrasco, que guarda a mesma chave). WhatsApp ainda não configurado: faltam `WA_ACCESS_TOKEN` e `WA_PHONE_NUMBER_ID`.
 
 Para publicar ou consultar a partir de uma sessão na nuvem: um token da API da Cloudflare (permissões Workers + D1 Edit) precisa estar salvo no ambiente para `api.cloudflare.com`. Com ele, use `CLOUDFLARE_API_TOKEN=proxy-injected` e `CLOUDFLARE_ACCOUNT_ID` da conta. No computador do dono, basta `npx wrangler login`.
 

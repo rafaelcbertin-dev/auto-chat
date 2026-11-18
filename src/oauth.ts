@@ -53,7 +53,10 @@ async function graph<T>(f: typeof fetch, url: string, init?: RequestInit): Promi
   return body;
 }
 
-/** Troca o código pelo token, descobre a conta do Instagram e inscreve a conta nos webhooks. */
+/**
+ * Troca o código pelo token, descobre as contas do Instagram compartilhadas com o app
+ * (pode ser mais de uma, ex.: Terravo e Ampliar) e inscreve cada uma nos webhooks.
+ */
 export async function completeConnection(opts: {
   code: string;
   appId: string;
@@ -61,7 +64,7 @@ export async function completeConnection(opts: {
   redirectUri: string;
   version: string;
   fetch?: typeof fetch;
-}): Promise<InstagramConnection> {
+}): Promise<InstagramConnection[]> {
   const f = opts.fetch ?? fetch.bind(globalThis);
   const base = `https://graph.facebook.com/${opts.version}`;
 
@@ -79,24 +82,27 @@ export async function completeConnection(opts: {
     `${base}/me/assigned_instagram_accounts?fields=id,username`,
     { headers: auth },
   );
-  const account = accounts.data?.[0];
-  if (!account) throw new Error('Nenhuma conta do Instagram foi compartilhada com o app. Refaça a conexão e selecione a conta.');
+  const list = (accounts.data ?? []).filter((a) => a?.id);
+  if (!list.length) throw new Error('Nenhuma conta do Instagram foi compartilhada com o app. Refaça a conexão e selecione a conta.');
 
-  // Inscreve a conta nos webhooks do app. Se a Meta recusar algum campo, tenta o conjunto mínimo.
-  let subscribeWarning: string | null = null;
-  for (const fields of [['comments', 'messages', 'messaging_postbacks'], ['comments', 'messages']]) {
-    try {
-      await graph(f, `${base}/${encodeURIComponent(account.id)}/subscribed_apps`, {
-        method: 'POST',
-        headers: { ...auth, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subscribed_fields: fields }),
-      });
-      subscribeWarning = null;
-      break;
-    } catch (e) {
-      subscribeWarning = String(e instanceof Error ? e.message : e);
+  const out: InstagramConnection[] = [];
+  for (const account of list) {
+    // Inscreve a conta nos webhooks do app. Se a Meta recusar algum campo, tenta o conjunto mínimo.
+    let subscribeWarning: string | null = null;
+    for (const fields of [['comments', 'messages', 'messaging_postbacks'], ['comments', 'messages']]) {
+      try {
+        await graph(f, `${base}/${encodeURIComponent(account.id)}/subscribed_apps`, {
+          method: 'POST',
+          headers: { ...auth, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subscribed_fields: fields }),
+        });
+        subscribeWarning = null;
+        break;
+      } catch (e) {
+        subscribeWarning = String(e instanceof Error ? e.message : e);
+      }
     }
+    out.push({ token, accountId: String(account.id), username: account.username ?? null, connectedAt: Date.now(), subscribeWarning });
   }
-
-  return { token, accountId: String(account.id), username: account.username ?? null, connectedAt: Date.now(), subscribeWarning };
+  return out;
 }
